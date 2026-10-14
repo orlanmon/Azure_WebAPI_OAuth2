@@ -1,0 +1,336 @@
+﻿/********************* Development Notes/Steps ******************/
+
+#1 Create Project ASP.NET CORE Web API
+
+#2 Add Swagger Support
+
+Install-Package Swashbuckle.AspNetCore -Version 6.6.2
+
+#3 Add CORS Support
+
+Install-Package Microsoft.AspNetCore.Cors
+
+!!!!Also remember to Configure the Azure App Service For the Proper CORS Domain Information!!!
+
+Azure: App Service -> API -> CORS  -> Allowed Origins
+
+
+AppSettings.JSON
+
+ "CorsSettings": {
+    "SpecificOriginsPolicy": {
+      "AllowedOrigins": "http://localhost:4200;",
+      "AllowedHeaders": "Content-Type;Authorization;",
+      "AllowedMethods": "GET;POST;PUT;DELETE;OPTIONS;",
+      "AllowCredentials": true
+    },
+    "AnyOriginPolicy": {
+      "AllowAnyOrigin": true,
+      "AllowedHeaders": "*",
+      "AllowedMethods": "*"
+    }
+  }
+
+
+  Program.cs
+
+
+   // Add the following to Conifgure CORS Settings
+
+            builder.Services.AddCors(options =>
+            {
+                // Configure SpecificOriginsPolicy
+                var specificOriginsSection = builder.Configuration.GetSection("CorsSettings:SpecificOriginsPolicy");
+                if (specificOriginsSection.Exists())
+                {
+                    var allowedOrigins = specificOriginsSection["AllowedOrigins"]?.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                    var allowedHeaders = specificOriginsSection["AllowedHeaders"]?.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                    var allowedMethods = specificOriginsSection["AllowedMethods"]?.Split(';', StringSplitOptions.RemoveEmptyEntries);
+                    var allowCredentials = specificOriginsSection.GetValue<bool>("AllowCredentials");
+
+                    options.AddPolicy("SpecificOriginsPolicy", policy =>
+                    {
+                        if (allowedOrigins != null && allowedOrigins.Length > 0)
+                        {
+                            policy.WithOrigins(allowedOrigins);
+                        }
+                        if (allowedHeaders != null && allowedHeaders.Length > 0)
+                        {
+                            policy.WithHeaders(allowedHeaders);
+                        }
+                        if (allowedMethods != null && allowedMethods.Length > 0)
+                        {
+                            policy.WithMethods(allowedMethods);
+                        }
+                        if (allowCredentials)
+                        {
+                            policy.AllowCredentials();
+                        }
+                    });
+                };
+
+
+
+
+// OAuth Client Credential Flow
+
+
+Establish a machine-to-machine trust using the Client Credentials Flow
+
+This ensures your client application authenticates securely using its own credentials rather than a user login
+
+https://www.codementor.io/
+
+
+To make an OAuth call to an Azure App Service, you must first register your applications in 
+Microsoft Entra ID (formerly Azure Active Directory), enable built-in authentication on the App Service,
+request a token, and attach that token to your API request
+
+
+You need to register two separate applications in the Azure Portal App Registrations to establish a trusted OAuth relationship.
+
+
+/**********************************
+The Backend App (Your App Service):
+/**********************************
+
+OAuth2WebAPI
+
+Navigate to App registrations > New registration.Name it (e.g., OAuth2-Web-API-Service) and click Register. 
+
+
+Go to Left Hand Menu Manage Menu Sub Menu Expose an API, click Set next to Application ID URI, and click save.
+
+Application ID URI:  api://1a983a44-a729-4269-a083-254a2e0b6745
+
+The globally unique URI used to identify this web API. It is the prefix for scopes and in access tokens, it is the value of the audience claim. Also referred to as an identifier URI.
+
+
+Click Add a scope, define a scope (e.g., API.Access), and click Add scope.
+
+
+Scope ID/URI:   api://1a983a44-a729-4269-a083-254a2e0b6745/Web.API.Access
+
+
+Add App Roles
+
+Web.API.Access.Role
+
+api://1a983a44-a729-4269-a083-254a2e0b6745/Web.API.Access.Role
+
+Ensure you select Application permissions not Delegated permissions
+
+
+Application(client)ID:  1a983a44-a729-4269-a083-254a2e0b6745
+Directory (tenant) ID:  02ab6bc4-9edc-4e50-b34f-f804fb5ff6fa
+
+
+
+/**********************************
+The Client App (The Caller):
+/**********************************
+
+
+Create a second registration (e.g., my-client-app) - OAuth2-Web-API-Client
+
+Application(client)ID:  feb6fe33-8229-4760-b244-a428a9f437ab
+Directory (tenant) ID:  02ab6bc4-9edc-4e50-b34f-f804fb5ff6fa
+Application ID URI:  	api://feb6fe33-8229-4760-b244-a428a9f437ab
+
+
+Go to Client Credentials - Add Certificate or Secret 
+
+New client secret.  OAuth2-Web-API-Client-Secret   Expires 180 Days
+
+
+Copy the secret Value immediately (it disappears after leaving the page).
+
+Secret Value:  5aB8Q~guVMdZOkCRhHRjJdlclD39gKnAsS7d9bjd
+Secret ID:   04bb59ba-fbaf-4e4c-98c2-d857f52cd0fd
+
+
+Go to Left Hand Menu Manage Sub Menu API permissions > Add a permission > My APIs
+Make Sure You Backend App Registration has an Owner Selected so that it is available for selection in My APIs!
+
+
+Select your backend app under App Registrations
+
+
+Add permissions, add your Scope and ensure the next step is followed for that scope.
+
+Add Permissions
+
+Ensure you select Application permissions not Delegated permissions
+
+
+Web.API.Access.Role
+
+
+Click Grant admin consent for [Your Tenant] to authorize the ( Button Next to Add Permission Under API Permissions)
+
+Grant Admin Consent for Default Directory
+
+
+/**********************************
+Protect the Azure App Service
+/**********************************
+
+Go to your App Service in the Azure Portal
+
+From the left menu, select Settings > Authentication and click Add identity provider.
+
+Choose Microsoft as the identity provider
+
+Associating the App Service with an Application Registration
+
+For the App registration type, select Pick an existing app registration and choose your Backend App registration.
+
+Set the "Unauthenticated requests" setting to HTTP 401 Unauthorized so that raw anonymous traffic is blocked
+
+Also you must Edit the Indentity Provider and Specify You Back End App Registration URI as the Audience!
+
+In Azure, the value for Allowed Token Audiences (often configured in Azure App Service Authentication/Easy Auth or Azure Functions) is the Application (Client) ID or the Application ID URI of the backend Web API that accepts the token. It must strictly match the aud (audience) claim embedded inside incoming JWT access tokens for authorization to succeed.
+
+
+Allowed token audiences
+
+api://1a983a44-a729-4269-a083-254a2e0b6745
+
+Client application requirement
+
+Allow requests from specific client applications
+
+Allowed client applications
+
+1a983a44-a729-4269-a083-254a2e0b6745
+
+
+
+// Claim Name Mapping on or off!!
+
+// Do Not Map JWT Claim Names - this breaks the JWT Authentication Code for Roles
+System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler.DefaultMapInboundClaims = false;
+
+
+
+
+
+
+Use the Azure Log Stream on App Service to debug server side Authentication and Authorization Issues - log stream example below
+
+
+/****************************************************************/
+
+
+The 5 Steps of the Authorization Code Flow
+
+Authorization Request: Your application directs the user’s browser to the service's authorization server.
+The URL includes parameters like your client_id, a redirect_uri, requested permissions (scope), and a randomized state parameter to prevent attacks.
+
+User Consent: The user logs in to the service (if not already authenticated) and is prompted to approve your application's requested access. 
+If they approve, the service redirects the user back to your redirect_uri.
+
+Receive Authorization Code: The redirection URL contains a short-lived, single-use authorization_code. Your app extracts this code from the URL.
+
+Code Exchange: Your application’s backend server makes a direct, secure POST request to the authorization server to trade the authorization_code for an access token.
+This step requires your private client_secret and must happen server-to-server.
+
+Receive Access Token: The server verifies the request and returns an access_token. 
+Your app then uses this token in HTTP headers to access protected resources (e.g., pulling a user's profile info) on their behalf.
+
+
+
+/* POSTMAN OAuth */
+
+
+https://login.microsoftonline.com/02ab6bc4-9edc-4e50-b34f-f804fb5ff6fa/oauth2/v2.0/token
+
+grant_type:  client_credentials
+
+client_id: 001897fc-2f77-4483-a8ef-9b7d88bf6c25
+
+client_secret: usG8Q~8nmHCH3KqlyERRW0GOtPutcv6cPpZv_dil
+
+scope:   api://6e34bd85-1b40-486f-a68c-014bf4de156a/.default
+
+
+
+
+
+
+2026-06-29T14:58:28  Welcome, you are now connected to log-streaming service. The default timeout is 2 hours. Change the timeout with the App Setting SCM_LOGSTREAM_TIMEOUT (in seconds).
+2026-06-29 14:59:05.306 +00:00 [Information] Microsoft.AspNetCore.Hosting.Diagnostics: Request starting HTTP/1.1 GET https://oauth2webapi-e2fnfjetahdyc2b0.canadacentral-01.azurewebsites.net/api/Secured/SecuredZipCodeLookup/14052 - - -
+2026-06-29 14:59:05.314 +00:00 [Trace] Microsoft.AspNetCore.HostFiltering.HostFilteringMiddleware: All hosts are allowed.
+2026-06-29 14:59:05.316 +00:00 [Debug] Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware: The request path  does not match the path filter
+2026-06-29 14:59:05.318 +00:00 [Debug] Microsoft.AspNetCore.Routing.Matching.DfaMatcher: 1 candidate(s) found for the request path '/api/Secured/SecuredZipCodeLookup/14052'
+2026-06-29 14:59:05.321 +00:00 [Debug] Microsoft.AspNetCore.Routing.Matching.DfaMatcher: Endpoint 'OAuth2.Web.API.Controllers.SecuredController.SecuredZipCodeLookup (OAuth2.Web.API)' with route pattern 'api/Secured/SecuredZipCodeLookup/{zip_code}' is valid for the request path '/api/Secured/SecuredZipCodeLookup/14052'
+2026-06-29 14:59:05.322 +00:00 [Debug] Microsoft.AspNetCore.Routing.EndpointRoutingMiddleware: Request matched endpoint 'OAuth2.Web.API.Controllers.SecuredController.SecuredZipCodeLookup (OAuth2.Web.API)'
+2026-06-29 14:59:05.322 +00:00 [Trace] Microsoft.AspNetCore.Routing.EndpointRoutingMiddleware: The endpoint does not specify the IRequestSizeLimitMetadata.
+2026-06-29 14:59:05.324 +00:00 [Debug] Microsoft.AspNetCore.Authorization.AuthorizationMiddleware: Policy authentication schemes  did not succeed
+2026-06-29 14:59:05.324 +00:00 [Information] Microsoft.AspNetCore.Authorization.DefaultAuthorizationService: Authorization failed. These requirements were not met:RolesAuthorizationRequirement:User.IsInRole must be true for one of the following roles: (Web.API.Access.Role)
+2026-06-29 14:59:05.329 +00:00 [Error] Microsoft.AspNetCore.Server.IIS.Core.IISHttpServer: Connection ID "17798225736763563117", Request ID "4001dc6e-0002-f700-b63f-84710c7967bb": An unhandled exception was thrown by the application.System.InvalidOperationException: No authenticationScheme was specified, and there was no DefaultChallengeScheme found. The default schemes can be set using either AddAuthentication(string defaultScheme) or AddAuthentication(Action<AuthenticationOptions> configureOptions).at Microsoft.AspNetCore.Authentication.AuthenticationService.ChallengeAsync(HttpContext context, String scheme, AuthenticationProperties properties)at Microsoft.AspNetCore.Authorization.Policy.AuthorizationMiddlewareResultHandler.<>c__DisplayClass0_0.<<HandleAsync>g__Handle|0>d.MoveNext()--- End of stack trace from previous location ---at Microsoft.AspNetCore.Authorization.AuthorizationMiddleware.Invoke(HttpContext context)at Microsoft.AspNetCore.Authentication.AuthenticationMiddleware.Invoke(HttpContext context)at Swashbuckle.AspNetCore.SwaggerUI.SwaggerUIMiddleware.Invoke(HttpContext httpContext)at Swashbuckle.AspNetCore.Swagger.SwaggerMiddleware.Invoke(HttpContext httpContext, ISwaggerProvider swaggerProvider)at Microsoft.AspNetCore.Server.IIS.Core.IISHttpContextOfT`1.ProcessRequestAsync()
+2026-06-29 14:59:05.330 +00:00 [Information] Microsoft.AspNetCore.Hosting.Diagnostics: Request finished HTTP/1.1 GET https://oauth2webapi-e2fnfjetahdyc2b0.canadacentral-01.azurewebsites.net/api/Secured/SecuredZipCodeLookup/14052 - 500 - - 24.3237ms
+2026-06-29T15:00:28  No new trace in the past 1 min(s).
+2026-06-29T15:01:28  No new trace in the past 2 min(s).
+
+
+2026-06-29 15:14:07.808 +00:00 [Information] Microsoft.AspNetCore.Hosting.Diagnostics: Request starting HTTP/1.1 GET https://oauth2webapi-e2fnfjetahdyc2b0.canadacentral-01.azurewebsites.net/api/Secured/SecuredZipCodeLookup/14052 - - -
+2026-06-29 15:14:07.808 +00:00 [Trace] Microsoft.AspNetCore.HostFiltering.HostFilteringMiddleware: All hosts are allowed.
+2026-06-29 15:14:07.809 +00:00 [Debug] Microsoft.AspNetCore.StaticFiles.StaticFileMiddleware: The request path  does not match the path filter
+2026-06-29 15:14:07.812 +00:00 [Debug] Microsoft.AspNetCore.Routing.Matching.DfaMatcher: 1 candidate(s) found for the request path '/api/Secured/SecuredZipCodeLookup/14052'
+2026-06-29 15:14:07.812 +00:00 [Debug] Microsoft.AspNetCore.Routing.Matching.DfaMatcher: Endpoint 'OAuth2.Web.API.Controllers.SecuredController.SecuredZipCodeLookup (OAuth2.Web.API)' with route pattern 'api/Secured/SecuredZipCodeLookup/{zip_code}' is valid for the request path '/api/Secured/SecuredZipCodeLookup/14052'
+2026-06-29 15:14:07.812 +00:00 [Debug] Microsoft.AspNetCore.Routing.EndpointRoutingMiddleware: Request matched endpoint 'OAuth2.Web.API.Controllers.SecuredController.SecuredZipCodeLookup (OAuth2.Web.API)'
+2026-06-29 15:14:07.812 +00:00 [Trace] Microsoft.AspNetCore.Routing.EndpointRoutingMiddleware: The endpoint does not specify the IRequestSizeLimitMetadata.
+2026-06-29 15:14:07.814 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: Failed to validate the token.Microsoft.IdentityModel.Tokens.SecurityTokenInvalidIssuerException: IDX10204: Unable to validate issuer. validationParameters.ValidIssuer is null or whitespace AND validationParameters.ValidIssuers is null or empty.at Microsoft.IdentityModel.Tokens.Validators.ValidateIssuerAsync(String issuer, SecurityToken securityToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)at Microsoft.IdentityModel.Tokens.Validators.ValidateIssuer(String issuer, SecurityToken securityToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)at Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler.ValidateSignature(JsonWebToken jwtToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)at Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler.ValidateSignatureAndIssuerSecurityKey(JsonWebToken jsonWebToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)at Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler.ValidateJWSAsync(JsonWebToken jsonWebToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)
+2026-06-29 15:14:07.814 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: Bearer was not authenticated. Failure message: IDX10204: Unable to validate issuer. validationParameters.ValidIssuer is null or whitespace AND validationParameters.ValidIssuers is null or empty.
+2026-06-29 15:14:07.815 +00:00 [Debug] Microsoft.AspNetCore.Authorization.AuthorizationMiddleware: Policy authentication schemes  did not succeed
+2026-06-29 15:14:07.815 +00:00 [Information] Microsoft.AspNetCore.Authorization.DefaultAuthorizationService: Authorization failed. These requirements were not met:RolesAuthorizationRequirement:User.IsInRole must be true for one of the following roles: (Web.API.Access.Role)
+2026-06-29 15:14:07.815 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: AuthenticationScheme: Bearer was challenged.
+2026-06-29 15:14:07.815 +00:00 [Information] Microsoft.AspNetCore.Hosting.Diagnostics: Request finished HTTP/1.1 GET https://oauth2webapi-e2fnfjetahdyc2b0.canadacentral-01.azurewebsites.net/api/Secured/SecuredZipCodeLookup/14052 - 401 - - 7.1423ms
+2026-06-29T15:15:28  No new trace in the past 1 min(s).
+
+
+// Example of Debugging Streaming Logs on App Service
+
+
+2026-06-29 15:25:45.964 +00:00 [Debug] Microsoft.AspNetCore.Routing.Matching.DfaMatcher: Endpoint 'OAuth2.Web.API.Controllers.SecuredController.SecuredZipCodeLookup (OAuth2.Web.API)' with route pattern 'api/Secured/SecuredZipCodeLookup/{zip_code}' is valid for the request path '/api/Secured/SecuredZipCodeLookup/14052'
+2026-06-29 15:25:45.965 +00:00 [Debug] Microsoft.AspNetCore.Routing.EndpointRoutingMiddleware: Request matched endpoint 'OAuth2.Web.API.Controllers.SecuredController.SecuredZipCodeLookup (OAuth2.Web.API)'
+2026-06-29 15:25:45.966 +00:00 [Trace] Microsoft.AspNetCore.Routing.EndpointRoutingMiddleware: The endpoint does not specify the IRequestSizeLimitMetadata.
+2026-06-29 15:25:46.053 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: Failed to validate the token.Microsoft.IdentityModel.Tokens.SecurityTokenInvalidAudienceException: IDX10208: Unable to validate audience. validationParameters.ValidAudience is null or whitespace and validationParameters.ValidAudiences is null.at Microsoft.IdentityModel.Tokens.Validators.ValidateAudience(IEnumerable`1 audiences, SecurityToken securityToken, TokenValidationParameters validationParameters)at Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler.ValidateSignature(JsonWebToken jwtToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)at Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler.ValidateSignatureAndIssuerSecurityKey(JsonWebToken jsonWebToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)at Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler.ValidateJWSAsync(JsonWebToken jsonWebToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)
+2026-06-29 15:25:46.061 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: Bearer was not authenticated. Failure message: IDX10208: Unable to validate audience. validationParameters.ValidAudience is null or whitespace and validationParameters.ValidAudiences is null.
+2026-06-29 15:25:46.063 +00:00 [Debug] Microsoft.AspNetCore.Authorization.AuthorizationMiddleware: Policy authentication schemes  did not succeed
+2026-06-29 15:25:46.064 +00:00 [Information] Microsoft.AspNetCore.Authorization.DefaultAuthorizationService: Authorization failed. These requirements were not met:RolesAuthorizationRequirement:User.IsInRole must be true for one of the following roles: (Web.API.Access.Role)
+2026-06-29 15:25:46.069 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: AuthenticationScheme: Bearer was challenged.
+2026-06-29 15:25:46.079 +00:00 [Information] Microsoft.AspNetCore.Hosting.Diagnostics: Request finished HTTP/1.1 GET https://oauth2webapi-e2fnfjetahdyc2b0.canadacentral-01.azurewebsites.net/api/Secured/SecuredZipCodeLookup/14052 - 401 - - 148.4209ms
+
+
+2026-06-29 15:32:15.265 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: Failed to validate the token.Microsoft.IdentityModel.Tokens.SecurityTokenSignatureKeyNotFoundException: IDX10500: Signature validation failed. No security keys were provided to validate the signature.at Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler.ValidateSignature(JsonWebToken jwtToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)at Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler.ValidateSignatureAndIssuerSecurityKey(JsonWebToken jsonWebToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)at Microsoft.IdentityModel.JsonWebTokens.JsonWebTokenHandler.ValidateJWSAsync(JsonWebToken jsonWebToken, TokenValidationParameters validationParameters, BaseConfiguration configuration)
+2026-06-29 15:32:15.273 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: Bearer was not authenticated. Failure message: IDX10500: Signature validation failed. No security keys were provided to validate the signature.
+2026-06-29 15:32:15.274 +00:00 [Debug] Microsoft.AspNetCore.Authorization.AuthorizationMiddleware: Policy authentication schemes  did not succeed
+2026-06-29 15:32:15.276 +00:00 [Information] Microsoft.AspNetCore.Authorization.DefaultAuthorizationService: Authorization failed. These requirements were not met:RolesAuthorizationRequirement:User.IsInRole must be true for one of the following roles: (Web.API.Access.Role)
+2026-06-29 15:32:15.281 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: AuthenticationScheme: Bearer was challenged.
+2026-06-29 15:32:15.291 +00:00 [Information] Microsoft.AspNetCore.Hosting.Diagnostics: Request finished HTTP/1.1 GET https://oauth2webapi-e2fnfjetahdyc2b0.canadacentral-01.azurewebsites.net/api/Secured/SecuredZipCodeLookup/14052 - 401 - - 152.6798ms
+
+
+2026-06-29 15:44:22.759 +00:00 [Trace] Microsoft.AspNetCore.Routing.EndpointRoutingMiddleware: The endpoint does not specify the IRequestSizeLimitMetadata.
+2026-06-29 15:44:23.371 +00:00 [Debug] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: Successfully validated the token.
+2026-06-29 15:44:23.372 +00:00 [Debug] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: AuthenticationScheme: Bearer was successfully authenticated.
+2026-06-29 15:44:23.375 +00:00 [Information] Microsoft.AspNetCore.Authorization.DefaultAuthorizationService: Authorization failed. These requirements were not met:RolesAuthorizationRequirement:User.IsInRole must be true for one of the following roles: (Web.API.Access.Role)
+2026-06-29 15:44:23.377 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: AuthenticationScheme: Bearer was forbidden.
+2026-06-29 15:44:23.382 +00:00 [Information] Microsoft.AspNetCore.Hosting.Diagnostics: Request finished HTTP/1.1 GET https://oauth2webapi-e2fnfjetahdyc2b0.canadacentral-01.azurewebsites.net/api/Secured/SecuredZipCodeLookup/14052 - 403 - - 658.2870ms
+
+
+2026-06-29 15:52:53.012 +00:00 [Debug] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: Successfully validated the token.
+2026-06-29 15:52:53.013 +00:00 [Debug] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: AuthenticationScheme: Bearer was successfully authenticated.
+2026-06-29 15:52:53.015 +00:00 [Debug] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: AuthenticationScheme: Bearer was successfully authenticated.
+2026-06-29 15:52:53.017 +00:00 [Information] Microsoft.AspNetCore.Authorization.DefaultAuthorizationService: Authorization failed. These requirements were not met:Handler assertion should evaluate to true.
+2026-06-29 15:52:53.018 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: AuthenticationScheme: Bearer was forbidden.
+2026-06-29 15:52:53.024 +00:00 [Information] Microsoft.AspNetCore.Hosting.Diagnostics: Request finished HTTP/1.1 GET https://oauth2webapi-e2fnfjetahdyc2b0.canadacentral-01.azurewebsites.net/api/Secured/SecuredZipCodeLookup/14052 - 403 - - 746.8199ms
+
+2026-06-29 16:03:30.146 +00:00 [Information] Microsoft.AspNetCore.Authorization.DefaultAuthorizationService: Authorization failed. These requirements were not met:RolesAuthorizationRequirement:User.IsInRole must be true for one of the following roles: (Web.API.Access.Role)
+2026-06-29 16:03:30.147 +00:00 [Information] Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerHandler: AuthenticationScheme: Bearer was forbidden.
+2026-06-29 16:03:30.153 +00:00 [Information] Microsoft.AspNetCore.Hosting.Diagnostics: Request finished HTTP/1.1 GET https://oauth2webapi-e2fnfjetahdyc2b0.canadacentral-01.azurewebsites.net/api/Secured/SecuredZipCodeLookup/14052 - 403 - - 644.1878ms
+2026-06-29T16:03:40  PID[12016] Verbose     SnapshotHelper::TakeSnapshotTimerCallback
+2026-06-29T16:03:40  PID[12016] Verbose     SnapshotHelper::TakeSnapshotInternal - no new files in CodeGen
+2026-06-29T16:03:40  PID[12016] Verbose     SnapshotHelper::TakeSnapshot time since last: 00:40:00.0455128
+
